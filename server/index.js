@@ -7,6 +7,10 @@ const produceRoutes = require('./routes/produce');
 const consumeRoutes = require('./routes/consume');
 const reportRoutes = require('./routes/reports');
 const authRoutes = require('./routes/auth');
+const loadTestRoutes = require('./routes/loadtest');
+const loadTestProfilesRoutes = require('./routes/loadtest-profiles');
+const jobHistoryRoutes = require('./routes/jobHistory');
+const jobManagerRoutes = require('./routes/jobManager');
 
 const app = express();
 const server = http.createServer(app);
@@ -63,6 +67,10 @@ app.use('/api/kafka', kafkaRoutes);
 app.use('/api/produce', produceRoutes);
 app.use('/api/consume', consumeRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/loadtest', loadTestRoutes);
+app.use('/api/loadtest/profiles', loadTestProfilesRoutes);
+app.use('/api/jobs', jobHistoryRoutes);
+app.use('/api/jobs', jobManagerRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

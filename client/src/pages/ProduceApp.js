@@ -12,6 +12,8 @@ const ProduceApp = () => {
   const [config, setConfig] = useState({
     topic: topicFromUrl,
     message: '',
+    jobName: '', // Auto-generate if empty
+    count: 1, // Number of messages to produce (when accumulation is disabled)
     accumulation: {
       enabled: false,
       prefix: 'TEST',
@@ -26,6 +28,9 @@ const ProduceApp = () => {
   const [jobStatus, setJobStatus] = useState({
     running: false,
     stats: null,
+    isOneTime: false, // Track if current stats are from one-time produce
+    completedAt: null, // Timestamp when one-time produce completed
+    progress: null, // { current: number, total: number } for count-based produce
   });
 
   const [logs, setLogs] = useState([]);
@@ -66,6 +71,33 @@ const ProduceApp = () => {
         if (data.type === 'produce') {
           setLogs((prev) => [data.data, ...prev].slice(0, 1000));
           updateChartData(data.data);
+          // Update progress if available (for count-based produce)
+          if (data.progress) {
+            setJobStatus(prev => ({
+              ...prev,
+              progress: data.progress,
+            }));
+          }
+          // Update stats in realtime for continuous produce
+          setJobStatus(prev => {
+            if (prev.running) {
+              // Trigger stats reload for running jobs
+              setTimeout(() => loadStats(), 100);
+            }
+            return prev;
+          });
+        } else if (data.type === 'produce-complete') {
+          // Update stats when count-based produce completes
+          // Keep the stats visible - don't clear them
+          const messageCount = parseInt(config.count) || 1;
+          setJobStatus({ 
+            running: false, 
+            stats: data.data.stats,
+            isOneTime: messageCount === 1,
+            completedAt: new Date(),
+            progress: messageCount > 1 ? { current: messageCount, total: messageCount } : null,
+          });
+          loadLogs();
         }
       };
 
@@ -107,7 +139,16 @@ const ProduceApp = () => {
   const loadStats = async () => {
     try {
       const res = await axios.get('/api/produce/stats');
-      setJobStatus({ ...jobStatus, stats: res.data.stats });
+      // Only update stats if there's a running job or if stats exist
+      // Don't overwrite one-time produce stats if no running job
+      if (res.data.stats && (jobStatus.running || res.data.stats.total > 0)) {
+        setJobStatus(prev => ({ 
+          ...prev, 
+          stats: res.data.stats,
+          // Clear one-time flag if we have running stats
+          isOneTime: prev.running ? false : prev.isOneTime,
+        }));
+      }
     } catch (error) {
       console.error('Error loading stats:', error);
     }
@@ -139,17 +180,57 @@ const ProduceApp = () => {
     } else {
       setConfig({
         ...config,
-        [name]: value,
+        [name]: type === 'number' ? parseInt(value) || (name === 'count' ? 1 : 0) : value,
       });
     }
   };
 
   const handleStart = async () => {
     try {
-      await axios.post('/api/produce/start', config);
-      setJobStatus({ running: true, stats: null });
-      setLogs([]);
-      setChartData([]);
+      const res = await axios.post('/api/produce/start', config);
+      
+      // If count-based produce (accumulation disabled)
+      if (!config.accumulation.enabled) {
+        const messageCount = parseInt(config.count) || 1;
+        // Initialize progress for count-based produce
+        if (messageCount > 1) {
+          setJobStatus({ 
+            running: true, // Show as running while producing
+            stats: null,
+            isOneTime: false,
+            completedAt: null,
+            progress: { current: 0, total: messageCount },
+          });
+        } else {
+          // One-time produce - stats returned immediately
+          if (res.data.stats) {
+            setJobStatus({ 
+              running: false, 
+              stats: res.data.stats,
+              isOneTime: true,
+              completedAt: new Date(),
+              progress: null,
+            });
+            loadLogs();
+          }
+        }
+        // Don't clear logs/chart for count-based - keep showing previous results
+      } else {
+        // For continuous produce, clear previous data and start fresh
+        setLogs([]);
+        setChartData([]);
+        // Start with running state, but keep previous stats visible until new stats arrive
+        setJobStatus(prev => ({ 
+          running: true, 
+          stats: prev.stats, // Keep previous stats visible temporarily
+          isOneTime: false, 
+          completedAt: null 
+        }));
+        // For continuous produce, load stats after a short delay to show realtime
+        setTimeout(() => {
+          loadStats();
+        }, 500);
+      }
     } catch (error) {
       alert(error.response?.data?.message || 'Failed to start produce job');
     }
@@ -158,7 +239,13 @@ const ProduceApp = () => {
   const handleStop = async () => {
     try {
       const res = await axios.post('/api/produce/stop');
-      setJobStatus({ running: false, stats: res.data.stats });
+      // Keep stats visible after stopping
+      setJobStatus({ 
+        running: false, 
+        stats: res.data.stats,
+        isOneTime: false,
+        completedAt: new Date(),
+      });
       loadLogs();
     } catch (error) {
       alert(error.response?.data?.message || 'Failed to stop produce job');
@@ -170,7 +257,7 @@ const ProduceApp = () => {
       await axios.delete('/api/produce/logs');
       setLogs([]);
       setChartData([]);
-      setJobStatus({ ...jobStatus, stats: null });
+      setJobStatus({ ...jobStatus, stats: null, isOneTime: false, completedAt: null });
     } catch (error) {
       console.error('Error clearing logs:', error);
     }
@@ -235,6 +322,20 @@ const ProduceApp = () => {
             </div>
 
             <div className="form-group">
+              <label>Job Name (Optional)</label>
+              <input
+                type="text"
+                name="jobName"
+                value={config.jobName}
+                onChange={handleInputChange}
+                placeholder="Auto-generated if empty"
+              />
+              <small style={{ display: 'block', marginTop: '4px', color: 'var(--text-secondary)' }}>
+                Leave empty to auto-generate: produce-YYYYMMDD-HHMMSS
+              </small>
+            </div>
+
+            <div className="form-group">
               <label>Message</label>
               <textarea
                 name="message"
@@ -245,6 +346,25 @@ const ProduceApp = () => {
               />
             </div>
 
+            {!config.accumulation.enabled && (
+              <div className="form-group">
+                <label>Number of Messages</label>
+                <input
+                  type="number"
+                  name="count"
+                  value={config.count}
+                  onChange={handleInputChange}
+                  min="1"
+                  placeholder="1"
+                />
+                <small style={{ display: 'block', marginTop: '4px', color: 'var(--text-secondary)' }}>
+                  {config.count === 1 
+                    ? 'จะส่ง message เพียงครั้งเดียว (One-time)' 
+                    : `จะส่ง message ทั้งหมด ${config.count} ครั้ง`}
+                </small>
+              </div>
+            )}
+
             <div className="form-group checkbox-group">
               <label>
                 <input
@@ -253,8 +373,13 @@ const ProduceApp = () => {
                   checked={config.accumulation.enabled}
                   onChange={handleInputChange}
                 />
-                Enable Accumulation
+                Enable Accumulation (ส่งหลาย messages แบบต่อเนื่อง)
               </label>
+              <small style={{ display: 'block', marginTop: '4px', color: 'var(--text-secondary)' }}>
+                {config.accumulation.enabled 
+                  ? 'จะส่ง messages หลายครั้งตามที่กำหนด (Start, End, Interval)' 
+                  : 'ปิดการใช้งาน - จะส่งตามจำนวนที่กำหนดด้านบน'}
+              </small>
             </div>
 
             {config.accumulation.enabled && (
@@ -332,10 +457,31 @@ const ProduceApp = () => {
         <div className="stats-panel">
           <div className="panel-header">
             <h2>Statistics</h2>
+            {jobStatus.isOneTime && jobStatus.completedAt && (
+              <span className="one-time-badge" title="One-time produce result">
+                One-time • {new Date(jobStatus.completedAt).toLocaleTimeString()}
+              </span>
+            )}
           </div>
           <div className="panel-content">
             {jobStatus.stats ? (
               <>
+                {jobStatus.progress && jobStatus.progress.total > 1 && (
+                  <div className="stat-item progress-item">
+                    <div className="stat-label">Progress</div>
+                    <div className="progress-bar-container">
+                      <div 
+                        className="progress-bar" 
+                        style={{ 
+                          width: `${(jobStatus.progress.current / jobStatus.progress.total) * 100}%` 
+                        }}
+                      />
+                      <div className="progress-text">
+                        {jobStatus.progress.current} / {jobStatus.progress.total}
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div className="stat-item">
                   <div className="stat-label">Total</div>
                   <div className="stat-value">{jobStatus.stats.total}</div>

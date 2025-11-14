@@ -9,9 +9,11 @@ import {
   Menu,
   X,
   LogOut,
-  User
+  User,
+  Zap
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import JobStatus from './JobStatus';
 import './Layout.css';
 
 const Layout = ({ children }) => {
@@ -24,6 +26,7 @@ const Layout = ({ children }) => {
     { path: '/kafka', label: 'KAFKA CONNECTION', icon: Database },
     { path: '/produce', label: 'PRODUCE APP', icon: Send },
     { path: '/consume', label: 'CONSUME APP', icon: Download },
+    { path: '/loadtest', label: 'LOAD TEST', icon: Zap },
     { path: '/reports', label: 'REPORTS', icon: BarChart3 },
   ];
 
@@ -91,6 +94,9 @@ const Layout = ({ children }) => {
       <div className="main-content">
         {children}
       </div>
+      
+      {/* Job Status Panel - shows running jobs */}
+      <JobStatus />
     </div>
   );
 };

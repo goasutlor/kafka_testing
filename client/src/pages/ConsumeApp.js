@@ -12,6 +12,7 @@ const ConsumeApp = () => {
   const [config, setConfig] = useState({
     topic: topicFromUrl,
     groupId: '',
+    jobName: '', // Auto-generate if empty
   });
 
   const [availableTopics, setAvailableTopics] = useState([]);
@@ -231,6 +232,20 @@ const ConsumeApp = () => {
                   <a href="/kafka" style={{ color: '#667eea' }}>Connect to Kafka</a> to see available topics
                 </small>
               )}
+            </div>
+
+            <div className="form-group">
+              <label>Job Name (Optional)</label>
+              <input
+                type="text"
+                name="jobName"
+                value={config.jobName}
+                onChange={handleInputChange}
+                placeholder="Auto-generated if empty"
+              />
+              <small style={{ display: 'block', marginTop: '4px', color: 'var(--text-secondary)' }}>
+                Leave empty to auto-generate: consume-YYYYMMDD-HHMMSS
+              </small>
             </div>
 
             <div className="form-group">

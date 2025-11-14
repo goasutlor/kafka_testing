@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, XCircle, Loader, RefreshCw, Send, Download } from 'lucide-react';
+import { CheckCircle, XCircle, Loader, RefreshCw, Send, Download, Clock, Trash2, History, Info, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './KafkaConnection.css';
@@ -30,9 +30,97 @@ const KafkaConnection = () => {
     retrievingTopics: false,
   });
 
+  const [connectionHistory, setConnectionHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [selectedTopic, setSelectedTopic] = useState(null);
+  const [topicInfo, setTopicInfo] = useState(null);
+  const [loadingTopicInfo, setLoadingTopicInfo] = useState(false);
+
+  // Load connection history from localStorage
   useEffect(() => {
+    const savedHistory = localStorage.getItem('kafkaConnectionHistory');
+    if (savedHistory) {
+      try {
+        const history = JSON.parse(savedHistory);
+        setConnectionHistory(history);
+      } catch (error) {
+        console.error('Error loading connection history:', error);
+      }
+    }
     checkStatus();
   }, []);
+
+  // Save connection history to localStorage
+  const saveConnectionHistory = (history) => {
+    try {
+      localStorage.setItem('kafkaConnectionHistory', JSON.stringify(history));
+      setConnectionHistory(history);
+    } catch (error) {
+      console.error('Error saving connection history:', error);
+    }
+  };
+
+  // Add connection to history
+  const addToHistory = (connectionData) => {
+    const historyItem = {
+      id: Date.now().toString(),
+      name: connectionData.brokers.split(',')[0] || 'Kafka Connection',
+      brokers: connectionData.brokers,
+      clientId: connectionData.clientId,
+      sasl: connectionData.sasl,
+      apiKey: connectionData.apiKey,
+      createdAt: new Date().toISOString(),
+      lastUsed: new Date().toISOString(),
+    };
+
+    const existingHistory = [...connectionHistory];
+    
+    // Remove duplicate (same brokers)
+    const filteredHistory = existingHistory.filter(
+      item => item.brokers !== historyItem.brokers
+    );
+    
+    // Add to beginning
+    const newHistory = [historyItem, ...filteredHistory].slice(0, 20); // Keep last 20
+    
+    saveConnectionHistory(newHistory);
+  };
+
+  // Load connection from history
+  const loadFromHistory = (historyItem) => {
+    setFormData({
+      brokers: historyItem.brokers,
+      clientId: historyItem.clientId || 'kafka-test-client',
+      sasl: historyItem.sasl || {
+        enabled: false,
+        mechanism: 'plain',
+        username: '',
+        password: '',
+      },
+      apiKey: historyItem.apiKey || {
+        enabled: false,
+        key: '',
+        secret: '',
+      },
+    });
+
+    // Update last used time
+    const updatedHistory = connectionHistory.map(item => {
+      if (item.id === historyItem.id) {
+        return { ...item, lastUsed: new Date().toISOString() };
+      }
+      return item;
+    });
+    saveConnectionHistory(updatedHistory);
+    setShowHistory(false);
+  };
+
+  // Delete connection from history
+  const deleteFromHistory = (id, e) => {
+    e.stopPropagation();
+    const updatedHistory = connectionHistory.filter(item => item.id !== id);
+    saveConnectionHistory(updatedHistory);
+  };
 
   const checkStatus = async () => {
     try {
@@ -94,6 +182,9 @@ const KafkaConnection = () => {
         message: res.data.message,
         topics: res.data.topics || [],
       });
+      
+      // Save to history on successful connection
+      addToHistory(formData);
     } catch (error) {
       const errorMessage = error.response?.data?.message || error.message || 'Connection failed';
       console.error('Kafka connection error:', error.response?.data || error);
@@ -134,12 +225,38 @@ const KafkaConnection = () => {
     }
   };
 
-  const handleUseTopic = (topic, action) => {
+  const handleUseTopic = (topic, action, e) => {
+    if (e) {
+      e.stopPropagation();
+    }
     if (action === 'produce') {
       navigate(`/produce?topic=${encodeURIComponent(topic)}`);
     } else if (action === 'consume') {
       navigate(`/consume?topic=${encodeURIComponent(topic)}`);
     }
+  };
+
+  const handleTopicClick = async (topic) => {
+    setSelectedTopic(topic);
+    setLoadingTopicInfo(true);
+    try {
+      const res = await axios.get(`/api/kafka/topic/${topic}/describe`);
+      if (res.data.success) {
+        setTopicInfo(res.data.topic);
+      } else {
+        setTopicInfo(null);
+      }
+    } catch (error) {
+      console.error('Error loading topic info:', error);
+      setTopicInfo(null);
+    } finally {
+      setLoadingTopicInfo(false);
+    }
+  };
+
+  const handleCloseTopicInfo = () => {
+    setSelectedTopic(null);
+    setTopicInfo(null);
   };
 
   return (
@@ -190,6 +307,60 @@ const KafkaConnection = () => {
       </div>
 
       <div className="connection-form-container">
+        {/* Connection History Panel */}
+        {connectionHistory.length > 0 && (
+          <div className="history-panel">
+            <div className="history-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <History size={18} />
+                <h3>Connection History</h3>
+                <span className="history-count">({connectionHistory.length})</span>
+              </div>
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className="toggle-history-btn"
+              >
+                {showHistory ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            {showHistory && (
+              <div className="history-list">
+                {connectionHistory.map((item) => (
+                  <div
+                    key={item.id}
+                    className="history-item"
+                    onClick={() => loadFromHistory(item)}
+                  >
+                    <div className="history-item-info">
+                      <div className="history-item-name">{item.name}</div>
+                      <div className="history-item-details">
+                        <span>{item.brokers}</span>
+                        {item.sasl?.enabled && (
+                          <span className="auth-badge">SASL</span>
+                        )}
+                        {item.apiKey?.enabled && (
+                          <span className="auth-badge">API Key</span>
+                        )}
+                      </div>
+                      <div className="history-item-time">
+                        <Clock size={12} />
+                        Last used: {new Date(item.lastUsed).toLocaleString()}
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => deleteFromHistory(item.id, e)}
+                      className="delete-history-btn"
+                      title="Delete from history"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <form onSubmit={handleConnect} className="connection-form">
           <div className="form-section">
             <h2>Basic Configuration</h2>
@@ -331,11 +502,19 @@ const KafkaConnection = () => {
             </div>
             <div className="topics-grid">
               {status.topics.map((topic, idx) => (
-                <div key={idx} className="topic-card">
-                  <div className="topic-name">{topic}</div>
-                  <div className="topic-actions">
+                <div 
+                  key={idx} 
+                  className="topic-card"
+                  onClick={() => handleTopicClick(topic)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <div className="topic-header">
+                    <div className="topic-name">{topic}</div>
+                    <Info size={16} className="topic-info-icon" title="Click to view details" />
+                  </div>
+                  <div className="topic-actions" onClick={(e) => e.stopPropagation()}>
                     <button
-                      onClick={() => handleUseTopic(topic, 'produce')}
+                      onClick={(e) => handleUseTopic(topic, 'produce', e)}
                       className="topic-btn produce-btn"
                       title="Use for Produce"
                     >
@@ -343,7 +522,7 @@ const KafkaConnection = () => {
                       Produce
                     </button>
                     <button
-                      onClick={() => handleUseTopic(topic, 'consume')}
+                      onClick={(e) => handleUseTopic(topic, 'consume', e)}
                       className="topic-btn consume-btn"
                       title="Use for Consume"
                     >
@@ -357,6 +536,107 @@ const KafkaConnection = () => {
           </div>
         )}
       </div>
+
+      {/* Topic Info Modal */}
+      {selectedTopic && (
+        <div className="topic-info-modal-overlay" onClick={handleCloseTopicInfo}>
+          <div className="topic-info-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h2>Topic: {selectedTopic}</h2>
+                <p className="modal-subtitle">Topic Details & Configuration</p>
+              </div>
+              <button
+                onClick={handleCloseTopicInfo}
+                className="modal-close-btn"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="modal-content">
+              {loadingTopicInfo ? (
+                <div className="loading-container">
+                  <Loader size={24} style={{ animation: 'spin 1s linear infinite' }} />
+                  <p>Loading topic information...</p>
+                </div>
+              ) : topicInfo ? (
+                <>
+                  <div className="topic-info-section">
+                    <h3>Basic Information</h3>
+                    <div className="info-grid">
+                      <div className="info-item">
+                        <span className="info-label">Topic Name</span>
+                        <span className="info-value">{topicInfo.name}</span>
+                      </div>
+                      <div className="info-item">
+                        <span className="info-label">Partitions</span>
+                        <span className="info-value">{topicInfo.partitions}</span>
+                      </div>
+                      <div className="info-item">
+                        <span className="info-label">Replication Factor</span>
+                        <span className="info-value">{topicInfo.replicationFactor}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {topicInfo.partitionDetails && topicInfo.partitionDetails.length > 0 && (
+                    <div className="topic-info-section">
+                      <h3>Partition Details</h3>
+                      <div className="partition-table-container">
+                        <table className="partition-table">
+                          <thead>
+                            <tr>
+                              <th>Partition ID</th>
+                              <th>Leader</th>
+                              <th>Replicas</th>
+                              <th>ISR</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {topicInfo.partitionDetails.map((partition, idx) => (
+                              <tr key={idx}>
+                                <td>{partition.partitionId}</td>
+                                <td>{partition.leader}</td>
+                                <td>{partition.replicas?.join(', ') || 'N/A'}</td>
+                                <td>{partition.isr?.join(', ') || 'N/A'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {topicInfo.configs && Object.keys(topicInfo.configs).length > 0 && (
+                    <div className="topic-info-section">
+                      <h3>Topic Configuration</h3>
+                      <div className="config-grid">
+                        {Object.entries(topicInfo.configs).map(([key, value]) => {
+                          if (!value || key.includes('password') || key.includes('secret')) return null;
+                          const displayKey = key.replace(/\./g, ' ').replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+                          return (
+                            <div key={key} className="config-item">
+                              <span className="config-label">{displayKey}</span>
+                              <span className="config-value">{String(value)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="error-container">
+                  <XCircle size={48} />
+                  <p>Failed to load topic information</p>
+                  <p className="error-detail">The topic may not exist or you may not have permission to view it.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

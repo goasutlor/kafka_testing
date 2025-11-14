@@ -7,6 +7,7 @@ import KafkaConnection from './pages/KafkaConnection';
 import ProduceApp from './pages/ProduceApp';
 import ConsumeApp from './pages/ConsumeApp';
 import Reports from './pages/Reports';
+import LoadTestPage from './pages/LoadTestPage';
 import './App.css';
 
 // Protected Route Component
@@ -84,6 +85,16 @@ function AppRoutes() {
           <ProtectedRoute>
             <Layout>
               <Reports />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/loadtest"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <LoadTestPage />
             </Layout>
           </ProtectedRoute>
         }

@@ -12,3 +12,11 @@ client/build/
 config.ini
 **/config.ini
 
+# Database files
+*.db
+*.db-shm
+*.db-wal
+server/data/
+*.sqlite
+*.sqlite3
+
